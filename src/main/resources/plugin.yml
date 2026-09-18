@@ -1,5 +1,5 @@
 name: DiscordBridge
-version: 2.3.0
+version: 2.4.0
 main: com.khangsmp.discordbridge.DiscordBridgePlugin
 api-version: '1.16'
 description: Cau noi chat hai chieu Minecraft <-> Discord cho KhangSMP

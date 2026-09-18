@@ -23,10 +23,12 @@ import com.google.gson.JsonParser;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.UUID;
+import java.util.Base64;
+import java.util.Collection;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -82,7 +84,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         }
 
         getLogger().info("========================================");
-        getLogger().info(" DiscordBridge v2.3 (Texture Skin & Floodgate/Offline)");
+        getLogger().info(" DiscordBridge v2.4 (GameProfile Base64 Texture Decoder)");
         getLogger().info(" Discord -> MC : " + apiUrl + " (" + pollInterval + "s)");
         getLogger().info(" MC -> Discord : " + (sendMcToDiscord ? "Webhook Active" : "Off"));
         getLogger().info("========================================");
@@ -129,7 +131,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Authorization", "Bearer " + apiKey);
             conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("User-Agent", "DiscordBridge/2.3");
+            conn.setRequestProperty("User-Agent", "DiscordBridge/2.4");
             conn.setConnectTimeout(4000);
             conn.setReadTimeout(4000);
 
@@ -193,7 +195,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
 
         Player p = event.getPlayer();
         String playerName = p.getName();
-        String skinUrl = extractPlayerSkinUrl(p);
+        String skinUrl = getSkinTextureUrl(p);
         String cleanMsg = ChatColor.stripColor(rawMsg).trim();
 
         if (cleanMsg.isEmpty()) return;
@@ -203,20 +205,32 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         }
     }
 
-    private String extractPlayerSkinUrl(Player player) {
+    private String getSkinTextureUrl(Player player) {
+        // Cách 1: Giải mã Base64 Texture từ GameProfile (Áp dụng cho mọi Server Spigot/Paper, Floodgate và SkinRestorer)
         try {
-            // Thử lấy Texture URL trực tiếp từ Paper PlayerProfile
-            Object profile = player.getClass().getMethod("getPlayerProfile").invoke(player);
-            if (profile != null) {
-                Object textures = profile.getClass().getMethod("getTextures").invoke(profile);
-                if (textures != null) {
-                    URL skin = (URL) textures.getClass().getMethod("getSkin").invoke(textures);
-                    if (skin != null) {
-                        String s = skin.toString();
-                        // Nếu lấy được link textures.minecraft.net/texture/{hash}
-                        if (s.contains("minecraft.net/texture/")) {
-                            String hash = s.substring(s.lastIndexOf('/') + 1);
-                            return "https://mc-heads.net/avatar/" + hash + "/128";
+            Method getProfileMethod = player.getClass().getMethod("getProfile");
+            Object gameProfile = getProfileMethod.invoke(player);
+            if (gameProfile != null) {
+                Method getPropertiesMethod = gameProfile.getClass().getMethod("getProperties");
+                Object propertyMap = getPropertiesMethod.invoke(gameProfile);
+                if (propertyMap != null) {
+                    Method getMethod = propertyMap.getClass().getMethod("get", Object.class);
+                    Collection<?> textures = (Collection<?>) getMethod.invoke(propertyMap, "textures");
+                    if (textures != null && !textures.isEmpty()) {
+                        Object property = textures.iterator().next();
+                        Method getValueMethod = property.getClass().getMethod("getValue");
+                        String base64Value = (String) getValueMethod.invoke(property);
+                        if (base64Value != null && !base64Value.isEmpty()) {
+                            String decodedJson = new String(Base64.getDecoder().decode(base64Value), StandardCharsets.UTF_8);
+                            JsonObject jsonObj = JsonParser.parseString(decodedJson).getAsJsonObject();
+                            JsonObject texObj = jsonObj.getAsJsonObject("textures");
+                            if (texObj != null && texObj.has("SKIN")) {
+                                String skinUrl = texObj.getAsJsonObject("SKIN").get("url").getAsString();
+                                if (skinUrl != null && skinUrl.contains("/texture/")) {
+                                    String hash = skinUrl.substring(skinUrl.lastIndexOf('/') + 1);
+                                    return "https://mc-heads.net/avatar/" + hash + "/128.png";
+                                }
+                            }
                         }
                     }
                 }
@@ -224,10 +238,29 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         } catch (Throwable ignored) {
         }
 
-        // Fallback: Nếu là Floodgate/Bedrock (tiền tố PE_)
+        // Cách 2: Lấy qua Paper PlayerProfile Textures API
+        try {
+            Object profile = player.getClass().getMethod("getPlayerProfile").invoke(player);
+            if (profile != null) {
+                Object textures = profile.getClass().getMethod("getTextures").invoke(profile);
+                if (textures != null) {
+                    URL skin = (URL) textures.getClass().getMethod("getSkin").invoke(textures);
+                    if (skin != null) {
+                        String s = skin.toString();
+                        if (s.contains("/texture/")) {
+                            String hash = s.substring(s.lastIndexOf('/') + 1);
+                            return "https://mc-heads.net/avatar/" + hash + "/128.png";
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        // Fallback Cách 3: Lấy theo tên (loại bỏ tiền tố PE_)
         String name = player.getName();
         String cleanName = name.startsWith("PE_") ? name.substring(3) : name;
-        return "https://mc-heads.net/avatar/" + cleanName + "/128";
+        return "https://mc-heads.net/avatar/" + cleanName + "/128.png";
     }
 
     private void sendChatToDiscord(String player, String skinUrl, String message) {
@@ -237,7 +270,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                conn.setRequestProperty("User-Agent", "DiscordBridge/2.3");
+                conn.setRequestProperty("User-Agent", "DiscordBridge/2.4");
                 conn.setConnectTimeout(4000);
                 conn.setReadTimeout(4000);
                 conn.setDoOutput(true);
@@ -286,7 +319,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             sender.sendMessage(ChatColor.GREEN + "[DiscordBridge] Đã tải lại cấu hình thành công!");
             return true;
         }
-        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.3 - Dùng /" + label + " reload để tải lại.");
+        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.4 - Dùng /" + label + " reload để tải lại.");
         return true;
     }
 
