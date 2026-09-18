@@ -82,7 +82,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         }
 
         getLogger().info("========================================");
-        getLogger().info(" DiscordBridge v2.2 (PE/Offline Skin Supported)");
+        getLogger().info(" DiscordBridge v2.3 (Texture Skin & Floodgate/Offline)");
         getLogger().info(" Discord -> MC : " + apiUrl + " (" + pollInterval + "s)");
         getLogger().info(" MC -> Discord : " + (sendMcToDiscord ? "Webhook Active" : "Off"));
         getLogger().info("========================================");
@@ -129,7 +129,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Authorization", "Bearer " + apiKey);
             conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("User-Agent", "DiscordBridge/2.2");
+            conn.setRequestProperty("User-Agent", "DiscordBridge/2.3");
             conn.setConnectTimeout(4000);
             conn.setReadTimeout(4000);
 
@@ -193,38 +193,60 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
 
         Player p = event.getPlayer();
         String playerName = p.getName();
-        UUID playerUuid = p.getUniqueId();
+        String skinUrl = extractPlayerSkinUrl(p);
         String cleanMsg = ChatColor.stripColor(rawMsg).trim();
 
         if (cleanMsg.isEmpty()) return;
 
         if (sendExecutor != null && !sendExecutor.isShutdown()) {
-            sendExecutor.submit(() -> sendChatToDiscord(playerName, playerUuid, cleanMsg));
+            sendExecutor.submit(() -> sendChatToDiscord(playerName, skinUrl, cleanMsg));
         }
     }
 
-    private void sendChatToDiscord(String player, UUID uuid, String message) {
+    private String extractPlayerSkinUrl(Player player) {
+        try {
+            // Thử lấy Texture URL trực tiếp từ Paper PlayerProfile
+            Object profile = player.getClass().getMethod("getPlayerProfile").invoke(player);
+            if (profile != null) {
+                Object textures = profile.getClass().getMethod("getTextures").invoke(profile);
+                if (textures != null) {
+                    URL skin = (URL) textures.getClass().getMethod("getSkin").invoke(textures);
+                    if (skin != null) {
+                        String s = skin.toString();
+                        // Nếu lấy được link textures.minecraft.net/texture/{hash}
+                        if (s.contains("minecraft.net/texture/")) {
+                            String hash = s.substring(s.lastIndexOf('/') + 1);
+                            return "https://mc-heads.net/avatar/" + hash + "/128";
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        // Fallback: Nếu là Floodgate/Bedrock (tiền tố PE_)
+        String name = player.getName();
+        String cleanName = name.startsWith("PE_") ? name.substring(3) : name;
+        return "https://mc-heads.net/avatar/" + cleanName + "/128";
+    }
+
+    private void sendChatToDiscord(String player, String skinUrl, String message) {
         if (webhookUrl != null && webhookUrl.startsWith("https://discord.com/api/webhooks/")) {
             try {
                 URL url = new URL(webhookUrl);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                conn.setRequestProperty("User-Agent", "DiscordBridge/2.2");
+                conn.setRequestProperty("User-Agent", "DiscordBridge/2.3");
                 conn.setConnectTimeout(4000);
                 conn.setReadTimeout(4000);
                 conn.setDoOutput(true);
 
-                // Xử lý avatar cho cả PE / Floodgate và Java
-                String cleanName = player.startsWith("PE_") ? player.substring(3) : player;
                 String displayName = player + " [In-Game]";
-
-                // Render avatar head cho Bedrock/Java
-                String avatarUrl = "https://minotar.net/helm/" + cleanName + "/128.png";
 
                 JsonObject payload = new JsonObject();
                 payload.addProperty("username", displayName);
-                payload.addProperty("avatar_url", avatarUrl);
+                payload.addProperty("avatar_url", skinUrl);
                 payload.addProperty("content", message);
 
                 byte[] out = payload.toString().getBytes(StandardCharsets.UTF_8);
@@ -264,7 +286,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             sender.sendMessage(ChatColor.GREEN + "[DiscordBridge] Đã tải lại cấu hình thành công!");
             return true;
         }
-        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.2 - Dùng /" + label + " reload để tải lại.");
+        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.3 - Dùng /" + label + " reload để tải lại.");
         return true;
     }
 
