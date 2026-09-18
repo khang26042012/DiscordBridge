@@ -158,7 +158,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             reader.close();
             conn.disconnect();
 
-            JsonObject json = JsonParser.parseString(sb.toString()).getAsJsonObject();
+            JsonObject json = new JsonParser().parse(sb.toString()).getAsJsonObject();
             JsonArray messages = json.getAsJsonArray("messages");
 
             if (messages == null || messages.size() == 0) {
@@ -320,7 +320,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                 while ((line = reader.readLine()) != null) sb.append(line);
                 reader.close();
 
-                JsonObject json = JsonParser.parseString(sb.toString()).getAsJsonObject();
+                JsonObject json = new JsonParser().parse(sb.toString()).getAsJsonObject();
                 if (json.has("texture_id")) {
                     String tid = json.get("texture_id").getAsString();
                     if (tid != null && !tid.isEmpty()) {
@@ -353,7 +353,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                 while ((line = reader.readLine()) != null) sb.append(line);
                 reader.close();
 
-                JsonObject json = JsonParser.parseString(sb.toString()).getAsJsonObject();
+                JsonObject json = new JsonParser().parse(sb.toString()).getAsJsonObject();
                 if (json.has("SKIN")) {
                     String skinUrl = json.getAsJsonObject("SKIN").get("url").getAsString();
                     if (skinUrl != null && !skinUrl.isEmpty()) {
@@ -368,7 +368,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
     private String extractHashFromBase64(String base64) {
         try {
             String decoded = new String(Base64.getDecoder().decode(base64), StandardCharsets.UTF_8);
-            JsonObject jsonObj = JsonParser.parseString(decoded).getAsJsonObject();
+            JsonObject jsonObj = new JsonParser().parse(decoded).getAsJsonObject();
             JsonObject texObj = jsonObj.getAsJsonObject("textures");
             if (texObj != null && texObj.has("SKIN")) {
                 String skinUrl = texObj.getAsJsonObject("SKIN").get("url").getAsString();
