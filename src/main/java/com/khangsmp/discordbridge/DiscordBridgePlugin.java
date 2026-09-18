@@ -23,12 +23,9 @@ import com.google.gson.JsonParser;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.Collection;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -84,7 +81,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         }
 
         getLogger().info("========================================");
-        getLogger().info(" DiscordBridge v2.5 (Skin Debug Logger & Robust Reflection)");
+        getLogger().info(" DiscordBridge v2.6 (3D Head Render /head/{hash})");
         getLogger().info(" Discord -> MC : " + apiUrl + " (" + pollInterval + "s)");
         getLogger().info(" MC -> Discord : " + (sendMcToDiscord ? "Webhook Active" : "Off"));
         getLogger().info("========================================");
@@ -131,7 +128,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Authorization", "Bearer " + apiKey);
             conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("User-Agent", "DiscordBridge/2.5");
+            conn.setRequestProperty("User-Agent", "DiscordBridge/2.6");
             conn.setConnectTimeout(4000);
             conn.setReadTimeout(4000);
 
@@ -198,7 +195,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         String skinUrl = getSkinTextureUrl(p);
         String cleanMsg = ChatColor.stripColor(rawMsg).trim();
 
-        getLogger().info("[Skin-Trace] Player: " + playerName + " -> Avatar: " + skinUrl);
+        getLogger().info("[Skin-Trace] " + playerName + " -> " + skinUrl);
 
         if (cleanMsg.isEmpty()) return;
 
@@ -208,60 +205,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
     }
 
     private String getSkinTextureUrl(Player player) {
-        // Cách 1: NMS / CraftPlayer getProfile().getProperties()
-        try {
-            Method getProfileMethod = null;
-            try {
-                getProfileMethod = player.getClass().getMethod("getProfile");
-            } catch (NoSuchMethodException e) {
-                for (Method m : player.getClass().getMethods()) {
-                    if (m.getName().equals("getProfile") && m.getParameterCount() == 0) {
-                        getProfileMethod = m;
-                        break;
-                    }
-                }
-            }
-
-            if (getProfileMethod != null) {
-                Object gameProfile = getProfileMethod.invoke(player);
-                if (gameProfile != null) {
-                    Method getPropertiesMethod = gameProfile.getClass().getMethod("getProperties");
-                    Object propertyMap = getPropertiesMethod.invoke(gameProfile);
-                    if (propertyMap != null) {
-                        Method getMethod = propertyMap.getClass().getMethod("get", Object.class);
-                        Collection<?> textures = (Collection<?>) getMethod.invoke(propertyMap, "textures");
-                        if (textures != null && !textures.isEmpty()) {
-                            Object property = textures.iterator().next();
-                            String base64Value = null;
-                            try {
-                                Method valMethod = property.getClass().getMethod("getValue");
-                                base64Value = (String) valMethod.invoke(property);
-                            } catch (NoSuchMethodException ex) {
-                                Method valMethod = property.getClass().getMethod("value");
-                                base64Value = (String) valMethod.invoke(property);
-                            }
-
-                            if (base64Value != null && !base64Value.isEmpty()) {
-                                String decodedJson = new String(Base64.getDecoder().decode(base64Value), StandardCharsets.UTF_8);
-                                JsonObject jsonObj = JsonParser.parseString(decodedJson).getAsJsonObject();
-                                JsonObject texObj = jsonObj.getAsJsonObject("textures");
-                                if (texObj != null && texObj.has("SKIN")) {
-                                    String skinUrl = texObj.getAsJsonObject("SKIN").get("url").getAsString();
-                                    if (skinUrl != null && skinUrl.contains("/texture/")) {
-                                        String hash = skinUrl.substring(skinUrl.lastIndexOf('/') + 1);
-                                        return "https://mc-heads.net/avatar/" + hash + "/128.png";
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            getLogger().warning("[Skin-Trace] GameProfile decode error: " + t.getMessage());
-        }
-
-        // Cách 2: Paper PlayerProfile
+        // Paper PlayerProfile Textures API (Chuẩn nhất trên Paper/Floodgate)
         try {
             Object profile = player.getClass().getMethod("getPlayerProfile").invoke(player);
             if (profile != null) {
@@ -272,7 +216,8 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                         String s = skin.toString();
                         if (s.contains("/texture/")) {
                             String hash = s.substring(s.lastIndexOf('/') + 1);
-                            return "https://mc-heads.net/avatar/" + hash + "/128.png";
+                            // mc-heads yêu cầu /head/{hash}/128.png để render 3D head chuẩn xác từ texture hash
+                            return "https://mc-heads.net/head/" + hash + "/128.png";
                         }
                     }
                 }
@@ -280,10 +225,10 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         } catch (Throwable ignored) {
         }
 
-        // Fallback Cách 3: Lấy theo tên (loại bỏ tiền tố PE_)
+        // Fallback: Lấy theo tên (bỏ tiền tố PE_)
         String name = player.getName();
         String cleanName = name.startsWith("PE_") ? name.substring(3) : name;
-        return "https://mc-heads.net/avatar/" + cleanName + "/128.png";
+        return "https://mc-heads.net/head/" + cleanName + "/128.png";
     }
 
     private void sendChatToDiscord(String player, String skinUrl, String message) {
@@ -293,7 +238,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                conn.setRequestProperty("User-Agent", "DiscordBridge/2.5");
+                conn.setRequestProperty("User-Agent", "DiscordBridge/2.6");
                 conn.setConnectTimeout(4000);
                 conn.setReadTimeout(4000);
                 conn.setDoOutput(true);
@@ -342,7 +287,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             sender.sendMessage(ChatColor.GREEN + "[DiscordBridge] Đã tải lại cấu hình thành công!");
             return true;
         }
-        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.5 - Dùng /" + label + " reload để tải lại.");
+        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.6 - Dùng /" + label + " reload để tải lại.");
         return true;
     }
 
