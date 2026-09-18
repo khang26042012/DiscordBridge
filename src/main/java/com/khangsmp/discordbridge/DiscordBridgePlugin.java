@@ -5,6 +5,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -25,6 +26,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -44,21 +46,20 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
     private BukkitTask pollTask;
     private ExecutorService sendExecutor;
 
-    // Pattern to filter emojis and unwanted Unicode symbols
     private static final Pattern EMOJI_PATTERN = Pattern.compile(
-        "[\\x{1F600}-\\x{1F64F}" +  // Emoticons
-        "\\x{1F300}-\\x{1F5FF}" +   // Symbols & Pictographs
-        "\\x{1F680}-\\x{1F6FF}" +   // Transport & Map
-        "\\x{1F1E0}-\\x{1F1FF}" +   // Flags
-        "\\x{2600}-\\x{26FF}" +     // Misc symbols
-        "\\x{2700}-\\x{27BF}" +     // Dingbats
-        "\\x{FE00}-\\x{FE0F}" +     // Variation Selectors
-        "\\x{1F900}-\\x{1F9FF}" +   // Supplemental Symbols
-        "\\x{1FA00}-\\x{1FA6F}" +   // Chess Symbols
-        "\\x{1FA70}-\\x{1FAFF}" +   // Symbols Extended-A
-        "\\x{200D}" +                  // Zero Width Joiner
-        "\\x{20E3}" +                  // Combining Enclosing Keycap
-        "\\x{FE0F}" +                  // Variation Selector-16
+        "[\\x{1F600}-\\x{1F64F}" +
+        "\\x{1F300}-\\x{1F5FF}" +
+        "\\x{1F680}-\\x{1F6FF}" +
+        "\\x{1F1E0}-\\x{1F1FF}" +
+        "\\x{2600}-\\x{26FF}" +
+        "\\x{2700}-\\x{27BF}" +
+        "\\x{FE00}-\\x{FE0F}" +
+        "\\x{1F900}-\\x{1F9FF}" +
+        "\\x{1FA00}-\\x{1FA6F}" +
+        "\\x{1FA70}-\\x{1FAFF}" +
+        "\\x{200D}" +
+        "\\x{20E3}" +
+        "\\x{FE0F}" +
         "]+",
         Pattern.UNICODE_CHARACTER_CLASS
     );
@@ -81,9 +82,9 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         }
 
         getLogger().info("========================================");
-        getLogger().info(" DiscordBridge v2.1 (Two-Way Dual Mode)");
+        getLogger().info(" DiscordBridge v2.2 (PE/Offline Skin Supported)");
         getLogger().info(" Discord -> MC : " + apiUrl + " (" + pollInterval + "s)");
-        getLogger().info(" MC -> Discord : " + (sendMcToDiscord ? (webhookUrl != null && !webhookUrl.isEmpty() ? "Webhook Active" : postUrl) : "Off"));
+        getLogger().info(" MC -> Discord : " + (sendMcToDiscord ? "Webhook Active" : "Off"));
         getLogger().info("========================================");
 
         startPollingTask();
@@ -97,7 +98,8 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         postUrl = getConfig().getString("api.post-url", 
             "https://bot-production-53d8.up.railway.app/api/minecraft-messages");
 
-        webhookUrl = getConfig().getString("api.webhook-url", "");
+        webhookUrl = getConfig().getString("api.webhook-url", 
+            "https://discord.com/api/webhooks/1550457214580559912/_PuohPUiSxkxgU3yYJFDHvbuUs4Shous3dkAu9IpPtpwYssPDdoht14FJF-bAlNjne3X");
 
         apiKey = getConfig().getString("api.key", "khangsmp_mcbridge_key_2026");
         pollInterval = Math.max(1, getConfig().getInt("poll-interval", 1));
@@ -127,7 +129,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Authorization", "Bearer " + apiKey);
             conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("User-Agent", "DiscordBridge/2.1");
+            conn.setRequestProperty("User-Agent", "DiscordBridge/2.2");
             conn.setConnectTimeout(4000);
             conn.setReadTimeout(4000);
 
@@ -189,34 +191,39 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             return;
         }
 
-        String playerName = event.getPlayer().getName();
+        Player p = event.getPlayer();
+        String playerName = p.getName();
+        UUID playerUuid = p.getUniqueId();
         String cleanMsg = ChatColor.stripColor(rawMsg).trim();
 
         if (cleanMsg.isEmpty()) return;
 
         if (sendExecutor != null && !sendExecutor.isShutdown()) {
-            sendExecutor.submit(() -> sendChatToDiscord(playerName, cleanMsg));
+            sendExecutor.submit(() -> sendChatToDiscord(playerName, playerUuid, cleanMsg));
         }
     }
 
-    private void sendChatToDiscord(String player, String message) {
-        // Ưu tiên 1: Gửi qua Webhook Discord nếu được cấu hình (nhanh tức thì, hiện avatar skin player 3D)
+    private void sendChatToDiscord(String player, UUID uuid, String message) {
         if (webhookUrl != null && webhookUrl.startsWith("https://discord.com/api/webhooks/")) {
             try {
                 URL url = new URL(webhookUrl);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                conn.setRequestProperty("User-Agent", "DiscordBridge/2.1");
+                conn.setRequestProperty("User-Agent", "DiscordBridge/2.2");
                 conn.setConnectTimeout(4000);
                 conn.setReadTimeout(4000);
                 conn.setDoOutput(true);
 
-                // Avatar player từ Crafatar (hoặc Visage)
-                String avatarUrl = "https://mc-heads.net/avatar/" + player + "/128";
+                // Xử lý avatar cho cả PE / Floodgate và Java
+                String cleanName = player.startsWith("PE_") ? player.substring(3) : player;
+                String displayName = player + " [In-Game]";
+
+                // Render avatar head cho Bedrock/Java
+                String avatarUrl = "https://minotar.net/helm/" + cleanName + "/128.png";
 
                 JsonObject payload = new JsonObject();
-                payload.addProperty("username", player + " [In-Game]");
+                payload.addProperty("username", displayName);
                 payload.addProperty("avatar_url", avatarUrl);
                 payload.addProperty("content", message);
 
@@ -228,37 +235,8 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                 int code = conn.getResponseCode();
                 conn.disconnect();
                 if (code == 200 || code == 204) {
-                    return; // Webhook thành công!
+                    return;
                 }
-            } catch (Exception ignored) {
-            }
-        }
-
-        // Ưu tiên 2: Fallback qua API Bot POST endpoint
-        if (postUrl != null && !postUrl.isEmpty()) {
-            try {
-                URL url = new URL(postUrl);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("POST");
-                conn.setRequestProperty("Authorization", "Bearer " + apiKey);
-                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("User-Agent", "DiscordBridge/2.1");
-                conn.setConnectTimeout(4000);
-                conn.setReadTimeout(4000);
-                conn.setDoOutput(true);
-
-                JsonObject payload = new JsonObject();
-                payload.addProperty("player", player);
-                payload.addProperty("message", message);
-
-                byte[] out = payload.toString().getBytes(StandardCharsets.UTF_8);
-                try (OutputStream os = conn.getOutputStream()) {
-                    os.write(out);
-                }
-
-                conn.getResponseCode();
-                conn.disconnect();
             } catch (Exception ignored) {
             }
         }
@@ -286,7 +264,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             sender.sendMessage(ChatColor.GREEN + "[DiscordBridge] Đã tải lại cấu hình thành công!");
             return true;
         }
-        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.1 - Dùng /" + label + " reload để tải lại.");
+        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.2 - Dùng /" + label + " reload để tải lại.");
         return true;
     }
 
