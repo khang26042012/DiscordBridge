@@ -1,0 +1,26 @@
+# ============================================================
+# KhangSMP DiscordBridge Configuration v2.0 (Two-Way Bridge)
+# ============================================================
+
+api:
+  # Chiều 1 (Discord -> Minecraft): Endpoint lấy tin nhắn từ Discord về
+  poll-url: "https://bot-production-53d8.up.railway.app/api/discord-messages/latest"
+  
+  # Chiều 2 (Minecraft -> Discord): Endpoint đẩy tin nhắn từ trong game lên Discord
+  post-url: "https://bot-production-53d8.up.railway.app/api/minecraft-messages"
+  
+  # Khóa bảo mật API giữa Bot và Server Minecraft
+  key: "khangsmp_mcbridge_key_2026"
+
+# Thời gian kiểm tra tin nhắn mới từ Discord (tính bằng giây, mặc định: 1 giây)
+poll-interval: 1
+
+# Bật/tắt gửi tin nhắn người chơi trong game lên Discord (#🌉・𝐜𝐡𝐚𝐭𝐢𝐧𝐠𝐚𝐦𝐞)
+send-mc-to-discord: true
+
+# Định dạng hiển thị tin nhắn Discord trong Minecraft
+# {name} = Tên Discord, {message} = Nội dung tin nhắn
+chat-format: "&b[Discord] &f{name}&7: &f{message}"
+
+# Giới hạn độ dài tối đa của tin nhắn hiển thị trong game (tránh spam lag màn hình)
+max-message-length: 200
