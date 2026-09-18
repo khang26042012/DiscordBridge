@@ -84,7 +84,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         }
 
         getLogger().info("========================================");
-        getLogger().info(" DiscordBridge v2.4 (GameProfile Base64 Texture Decoder)");
+        getLogger().info(" DiscordBridge v2.5 (Skin Debug Logger & Robust Reflection)");
         getLogger().info(" Discord -> MC : " + apiUrl + " (" + pollInterval + "s)");
         getLogger().info(" MC -> Discord : " + (sendMcToDiscord ? "Webhook Active" : "Off"));
         getLogger().info("========================================");
@@ -131,7 +131,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Authorization", "Bearer " + apiKey);
             conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("User-Agent", "DiscordBridge/2.4");
+            conn.setRequestProperty("User-Agent", "DiscordBridge/2.5");
             conn.setConnectTimeout(4000);
             conn.setReadTimeout(4000);
 
@@ -198,6 +198,8 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         String skinUrl = getSkinTextureUrl(p);
         String cleanMsg = ChatColor.stripColor(rawMsg).trim();
 
+        getLogger().info("[Skin-Trace] Player: " + playerName + " -> Avatar: " + skinUrl);
+
         if (cleanMsg.isEmpty()) return;
 
         if (sendExecutor != null && !sendExecutor.isShutdown()) {
@@ -206,39 +208,60 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
     }
 
     private String getSkinTextureUrl(Player player) {
-        // Cách 1: Giải mã Base64 Texture từ GameProfile (Áp dụng cho mọi Server Spigot/Paper, Floodgate và SkinRestorer)
+        // Cách 1: NMS / CraftPlayer getProfile().getProperties()
         try {
-            Method getProfileMethod = player.getClass().getMethod("getProfile");
-            Object gameProfile = getProfileMethod.invoke(player);
-            if (gameProfile != null) {
-                Method getPropertiesMethod = gameProfile.getClass().getMethod("getProperties");
-                Object propertyMap = getPropertiesMethod.invoke(gameProfile);
-                if (propertyMap != null) {
-                    Method getMethod = propertyMap.getClass().getMethod("get", Object.class);
-                    Collection<?> textures = (Collection<?>) getMethod.invoke(propertyMap, "textures");
-                    if (textures != null && !textures.isEmpty()) {
-                        Object property = textures.iterator().next();
-                        Method getValueMethod = property.getClass().getMethod("getValue");
-                        String base64Value = (String) getValueMethod.invoke(property);
-                        if (base64Value != null && !base64Value.isEmpty()) {
-                            String decodedJson = new String(Base64.getDecoder().decode(base64Value), StandardCharsets.UTF_8);
-                            JsonObject jsonObj = JsonParser.parseString(decodedJson).getAsJsonObject();
-                            JsonObject texObj = jsonObj.getAsJsonObject("textures");
-                            if (texObj != null && texObj.has("SKIN")) {
-                                String skinUrl = texObj.getAsJsonObject("SKIN").get("url").getAsString();
-                                if (skinUrl != null && skinUrl.contains("/texture/")) {
-                                    String hash = skinUrl.substring(skinUrl.lastIndexOf('/') + 1);
-                                    return "https://mc-heads.net/avatar/" + hash + "/128.png";
+            Method getProfileMethod = null;
+            try {
+                getProfileMethod = player.getClass().getMethod("getProfile");
+            } catch (NoSuchMethodException e) {
+                for (Method m : player.getClass().getMethods()) {
+                    if (m.getName().equals("getProfile") && m.getParameterCount() == 0) {
+                        getProfileMethod = m;
+                        break;
+                    }
+                }
+            }
+
+            if (getProfileMethod != null) {
+                Object gameProfile = getProfileMethod.invoke(player);
+                if (gameProfile != null) {
+                    Method getPropertiesMethod = gameProfile.getClass().getMethod("getProperties");
+                    Object propertyMap = getPropertiesMethod.invoke(gameProfile);
+                    if (propertyMap != null) {
+                        Method getMethod = propertyMap.getClass().getMethod("get", Object.class);
+                        Collection<?> textures = (Collection<?>) getMethod.invoke(propertyMap, "textures");
+                        if (textures != null && !textures.isEmpty()) {
+                            Object property = textures.iterator().next();
+                            String base64Value = null;
+                            try {
+                                Method valMethod = property.getClass().getMethod("getValue");
+                                base64Value = (String) valMethod.invoke(property);
+                            } catch (NoSuchMethodException ex) {
+                                Method valMethod = property.getClass().getMethod("value");
+                                base64Value = (String) valMethod.invoke(property);
+                            }
+
+                            if (base64Value != null && !base64Value.isEmpty()) {
+                                String decodedJson = new String(Base64.getDecoder().decode(base64Value), StandardCharsets.UTF_8);
+                                JsonObject jsonObj = JsonParser.parseString(decodedJson).getAsJsonObject();
+                                JsonObject texObj = jsonObj.getAsJsonObject("textures");
+                                if (texObj != null && texObj.has("SKIN")) {
+                                    String skinUrl = texObj.getAsJsonObject("SKIN").get("url").getAsString();
+                                    if (skinUrl != null && skinUrl.contains("/texture/")) {
+                                        String hash = skinUrl.substring(skinUrl.lastIndexOf('/') + 1);
+                                        return "https://mc-heads.net/avatar/" + hash + "/128.png";
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            getLogger().warning("[Skin-Trace] GameProfile decode error: " + t.getMessage());
         }
 
-        // Cách 2: Lấy qua Paper PlayerProfile Textures API
+        // Cách 2: Paper PlayerProfile
         try {
             Object profile = player.getClass().getMethod("getPlayerProfile").invoke(player);
             if (profile != null) {
@@ -270,7 +293,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                conn.setRequestProperty("User-Agent", "DiscordBridge/2.4");
+                conn.setRequestProperty("User-Agent", "DiscordBridge/2.5");
                 conn.setConnectTimeout(4000);
                 conn.setReadTimeout(4000);
                 conn.setDoOutput(true);
@@ -319,7 +342,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             sender.sendMessage(ChatColor.GREEN + "[DiscordBridge] Đã tải lại cấu hình thành công!");
             return true;
         }
-        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.4 - Dùng /" + label + " reload để tải lại.");
+        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.5 - Dùng /" + label + " reload để tải lại.");
         return true;
     }
 
