@@ -16,7 +16,6 @@ import org.bukkit.scheduler.BukkitTask;
 
 import org.geysermc.floodgate.api.FloodgateApi;
 import org.geysermc.floodgate.api.player.FloodgatePlayer;
-import org.geysermc.floodgate.api.player.PropertyKey;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -27,11 +26,9 @@ import com.google.gson.JsonParser;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -92,7 +89,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         }
 
         getLogger().info("========================================");
-        getLogger().info(" DiscordBridge v2.7.1 (XUID & PropertyKey Fix)");
+        getLogger().info(" DiscordBridge v2.8 (Direct Geyser In-Memory Skin Extractor)");
         getLogger().info(" Discord -> MC : " + apiUrl + " (" + pollInterval + "s)");
         getLogger().info(" MC -> Discord : " + (sendMcToDiscord ? "Webhook Active" : "Off"));
         getLogger().info("========================================");
@@ -139,7 +136,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Authorization", "Bearer " + apiKey);
             conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("User-Agent", "DiscordBridge/2.7.1");
+            conn.setRequestProperty("User-Agent", "DiscordBridge/2.8");
             conn.setConnectTimeout(4000);
             conn.setReadTimeout(4000);
 
@@ -237,45 +234,19 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
     private String fetchSkinDirectly(Player player) {
         String name = player.getName();
 
-        // 1. Floodgate API
-        try {
-            if (Bukkit.getPluginManager().isPluginEnabled("floodgate")) {
-                FloodgatePlayer fp = FloodgateApi.getInstance().getPlayer(player.getUniqueId());
-                if (fp != null) {
-                    getLogger().info("[Floodgate] Found player: " + name + ", XUID: " + fp.getXuid());
-
-                    // Thử lấy PropertyKey.SKIN_UPLOADED chuẩn
-                    try {
-                        Object skinProp = fp.getProperty(PropertyKey.SKIN_UPLOADED);
-                        if (skinProp != null) {
-                            Method valMethod = skinProp.getClass().getMethod("value");
-                            String base64 = (String) valMethod.invoke(skinProp);
-                            String hash = extractHashFromBase64(base64);
-                            if (hash != null && !hash.equals(DEFAULT_STEVE_HASH)) {
-                                getLogger().info("[Floodgate] Found skin from PropertyKey.SKIN_UPLOADED: " + hash);
-                                return "https://mc-heads.net/head/" + hash + "/128.png";
-                            }
-                        }
-                    } catch (Throwable t) {
-                        getLogger().warning("[Floodgate] Skin property read error: " + t.getMessage());
-                    }
-
-                    // Query Geyser Global API bằng XUID
-                    String xuid = fp.getXuid();
-                    if (xuid != null && !xuid.isEmpty()) {
-                        String geyserSkin = fetchGeyserSkinByXuid(xuid);
-                        if (geyserSkin != null) {
-                            getLogger().info("[Floodgate] Found skin from Geyser API: " + geyserSkin);
-                            return geyserSkin;
-                        }
-                    }
+        // 1. Nếu là người chơi Bedrock/PE -> Trích xuất trực tiếp Pixel Skin từ bộ nhớ Geyser
+        if (name.startsWith("PE_") || (Bukkit.getPluginManager().isPluginEnabled("floodgate") 
+                && FloodgateApi.getInstance().isFloodgatePlayer(player.getUniqueId()))) {
+            byte[] headPng = BedrockSkinExtractor.extractHeadPng(player, getLogger());
+            if (headPng != null && headPng.length > 0) {
+                String catboxUrl = BedrockSkinExtractor.uploadToCatbox(headPng, getLogger());
+                if (catboxUrl != null) {
+                    return catboxUrl;
                 }
             }
-        } catch (Throwable t) {
-            getLogger().warning("[Floodgate] Inspect error: " + t.getMessage());
         }
 
-        // 2. Paper PlayerProfile Textures
+        // 2. Paper PlayerProfile Textures (cho Java premium hoặc SkinRestorer nếu có)
         try {
             Object profile = player.getClass().getMethod("getPlayerProfile").invoke(player);
             if (profile != null) {
@@ -308,43 +279,6 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         return "https://mc-heads.net/head/" + cleanName + "/128.png";
     }
 
-    private String fetchGeyserSkinByXuid(String xuid) {
-        try {
-            URL url = new URL("https://api.geysermc.org/v2/skin/" + xuid);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DiscordBridge/2.7");
-            conn.setConnectTimeout(3000);
-            conn.setReadTimeout(3000);
-            int code = conn.getResponseCode();
-            getLogger().info("[Geyser-Skin] Query XUID " + xuid + " -> HTTP " + code);
-            if (code == 200) {
-                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) sb.append(line);
-                reader.close();
-
-                JsonObject json = new JsonParser().parse(sb.toString()).getAsJsonObject();
-                if (json.has("texture_id")) {
-                    String tid = json.get("texture_id").getAsString();
-                    if (tid != null && !tid.isEmpty()) {
-                        return "https://mc-heads.net/head/" + tid + "/128.png";
-                    }
-                }
-                if (json.has("value")) {
-                    String hash = extractHashFromBase64(json.get("value").getAsString());
-                    if (hash != null) {
-                        return "https://mc-heads.net/head/" + hash + "/128.png";
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            getLogger().warning("[Geyser-Skin] Query error: " + t.getMessage());
-        }
-        return null;
-    }
-
     private String fetchTLauncherSkin(String username) {
         try {
             URL url = new URL("https://auth.tlauncher.org/skin/profile/texture/login/" + username);
@@ -372,21 +306,6 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         return null;
     }
 
-    private String extractHashFromBase64(String base64) {
-        try {
-            String decoded = new String(Base64.getDecoder().decode(base64), StandardCharsets.UTF_8);
-            JsonObject jsonObj = new JsonParser().parse(decoded).getAsJsonObject();
-            JsonObject texObj = jsonObj.getAsJsonObject("textures");
-            if (texObj != null && texObj.has("SKIN")) {
-                String skinUrl = texObj.getAsJsonObject("SKIN").get("url").getAsString();
-                if (skinUrl != null && skinUrl.contains("/texture/")) {
-                    return skinUrl.substring(skinUrl.lastIndexOf('/') + 1);
-                }
-            }
-        } catch (Throwable ignored) {}
-        return null;
-    }
-
     private void sendChatToDiscord(String player, String skinUrl, String message) {
         if (webhookUrl != null && webhookUrl.startsWith("https://discord.com/api/webhooks/")) {
             try {
@@ -394,7 +313,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                conn.setRequestProperty("User-Agent", "DiscordBridge/2.7.1");
+                conn.setRequestProperty("User-Agent", "DiscordBridge/2.8");
                 conn.setConnectTimeout(4000);
                 conn.setReadTimeout(4000);
                 conn.setDoOutput(true);
@@ -457,7 +376,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             return true;
         }
 
-        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.7.1 - Dùng /" + label + " reload hoặc /" + label + " testskin <player>");
+        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.8 - Dùng /" + label + " reload hoặc /" + label + " testskin <player>");
         return true;
     }
 

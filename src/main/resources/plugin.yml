@@ -1,5 +1,5 @@
 name: DiscordBridge
-version: 2.7.0
+version: 2.8.0
 main: com.khangsmp.discordbridge.DiscordBridgePlugin
 api-version: '1.16'
 softdepend: [floodgate, Geyser-Spigot]
