@@ -1,12 +1,15 @@
 # ============================================================
-# KhangSMP DiscordBridge Configuration v2.0 (Two-Way Bridge)
+# KhangSMP DiscordBridge Configuration v2.1 (Two-Way Dual Mode)
 # ============================================================
 
 api:
   # Chiều 1 (Discord -> Minecraft): Endpoint lấy tin nhắn từ Discord về
   poll-url: "https://bot-production-53d8.up.railway.app/api/discord-messages/latest"
   
-  # Chiều 2 (Minecraft -> Discord): Endpoint đẩy tin nhắn từ trong game lên Discord
+  # Chiều 2A (Minecraft -> Discord Webhook): Gửi thẳng vào Webhook Discord (tốc độ tức thì + Avatar skin 3D player)
+  webhook-url: "https://discord.com/api/webhooks/1550457214580559912/_PuohPUiSxkxgU3yYJFDHvbuUs4Shous3dkAu9IpPtpwYssPDdoht14FJF-bAlNjne3X"
+
+  # Chiều 2B (Minecraft -> Discord Bot): Fallback qua REST API bot
   post-url: "https://bot-production-53d8.up.railway.app/api/minecraft-messages"
   
   # Khóa bảo mật API giữa Bot và Server Minecraft
@@ -20,7 +23,7 @@ send-mc-to-discord: true
 
 # Định dạng hiển thị tin nhắn Discord trong Minecraft
 # {name} = Tên Discord, {message} = Nội dung tin nhắn
-chat-format: "&b[Discord] &f{name}&7: &f{message}"
+chat-format: "&9[Discord] &f{name}&7: &f{message}"
 
 # Giới hạn độ dài tối đa của tin nhắn hiển thị trong game (tránh spam lag màn hình)
 max-message-length: 200

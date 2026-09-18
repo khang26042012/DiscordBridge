@@ -32,9 +32,9 @@ import java.util.regex.Pattern;
 
 public class DiscordBridgePlugin extends JavaPlugin implements Listener, CommandExecutor {
 
-    // Config options
     private String apiUrl;
     private String postUrl;
+    private String webhookUrl;
     private String apiKey;
     private int pollInterval;
     private String chatFormat;
@@ -68,25 +68,22 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         saveDefaultConfig();
         loadConfigValues();
 
-        // Executor cho HTTP POST gửi tin từ MC lên Discord (không block main thread)
         sendExecutor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "DiscordBridge-Sender");
             t.setDaemon(true);
             return t;
         });
 
-        // Đăng ký sự kiện chat người chơi
         getServer().getPluginManager().registerEvents(this, this);
 
-        // Đăng ký lệnh reload
         if (getCommand("discordbridge") != null) {
             getCommand("discordbridge").setExecutor(this);
         }
 
         getLogger().info("========================================");
-        getLogger().info(" DiscordBridge v2.0 (Two-Way Bridge)");
+        getLogger().info(" DiscordBridge v2.1 (Two-Way Dual Mode)");
         getLogger().info(" Discord -> MC : " + apiUrl + " (" + pollInterval + "s)");
-        getLogger().info(" MC -> Discord : " + (sendMcToDiscord ? postUrl : "Tắt"));
+        getLogger().info(" MC -> Discord : " + (sendMcToDiscord ? (webhookUrl != null && !webhookUrl.isEmpty() ? "Webhook Active" : postUrl) : "Off"));
         getLogger().info("========================================");
 
         startPollingTask();
@@ -100,9 +97,11 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         postUrl = getConfig().getString("api.post-url", 
             "https://bot-production-53d8.up.railway.app/api/minecraft-messages");
 
+        webhookUrl = getConfig().getString("api.webhook-url", "");
+
         apiKey = getConfig().getString("api.key", "khangsmp_mcbridge_key_2026");
         pollInterval = Math.max(1, getConfig().getInt("poll-interval", 1));
-        chatFormat = getConfig().getString("chat-format", "&bDiscord &7| &f{name}&7: &f{message}");
+        chatFormat = getConfig().getString("chat-format", "&9[Discord] &f{name}&7: &f{message}");
         maxMessageLength = getConfig().getInt("max-message-length", 200);
         sendMcToDiscord = getConfig().getBoolean("send-mc-to-discord", true);
     }
@@ -128,6 +127,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Authorization", "Bearer " + apiKey);
             conn.setRequestProperty("Accept", "application/json");
+            conn.setRequestProperty("User-Agent", "DiscordBridge/2.1");
             conn.setConnectTimeout(4000);
             conn.setReadTimeout(4000);
 
@@ -158,7 +158,6 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                 String author = msg.has("author") ? msg.get("author").getAsString() : "Unknown";
                 String content = msg.has("content") ? msg.get("content").getAsString() : "";
 
-                // Lọc bỏ tin nhắn rác hoặc chỉ có icon
                 content = filterMessage(content);
                 if (content.isEmpty()) {
                     continue;
@@ -168,7 +167,6 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                     content = content.substring(0, maxMessageLength) + "...";
                 }
 
-                // Format và broadcast vào game
                 String formatted = ChatColor.translateAlternateColorCodes('&',
                     chatFormat.replace("{name}", author).replace("{message}", content));
 
@@ -178,7 +176,6 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             }
 
         } catch (Exception ignored) {
-            // Không spam console khi bot đang restart/deploy
         }
     }
 
@@ -189,7 +186,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
 
         String rawMsg = event.getMessage();
         if (rawMsg == null || rawMsg.trim().isEmpty() || rawMsg.startsWith("/")) {
-            return; // Bỏ qua lệnh
+            return;
         }
 
         String playerName = event.getPlayer().getName();
@@ -197,41 +194,73 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
 
         if (cleanMsg.isEmpty()) return;
 
-        // Đẩy sang thread riêng để gửi HTTP POST, không ảnh hưởng chat ingame
         if (sendExecutor != null && !sendExecutor.isShutdown()) {
             sendExecutor.submit(() -> sendChatToDiscord(playerName, cleanMsg));
         }
     }
 
     private void sendChatToDiscord(String player, String message) {
-        try {
-            URL url = new URL(postUrl);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Authorization", "Bearer " + apiKey);
-            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            conn.setRequestProperty("Accept", "application/json");
-            conn.setConnectTimeout(4000);
-            conn.setReadTimeout(4000);
-            conn.setDoOutput(true);
+        // Ưu tiên 1: Gửi qua Webhook Discord nếu được cấu hình (nhanh tức thì, hiện avatar skin player 3D)
+        if (webhookUrl != null && webhookUrl.startsWith("https://discord.com/api/webhooks/")) {
+            try {
+                URL url = new URL(webhookUrl);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                conn.setRequestProperty("User-Agent", "DiscordBridge/2.1");
+                conn.setConnectTimeout(4000);
+                conn.setReadTimeout(4000);
+                conn.setDoOutput(true);
 
-            JsonObject payload = new JsonObject();
-            payload.addProperty("player", player);
-            payload.addProperty("message", message);
+                // Avatar player từ Crafatar (hoặc Visage)
+                String avatarUrl = "https://mc-heads.net/avatar/" + player + "/128";
 
-            byte[] out = payload.toString().getBytes(StandardCharsets.UTF_8);
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(out);
+                JsonObject payload = new JsonObject();
+                payload.addProperty("username", player + " [In-Game]");
+                payload.addProperty("avatar_url", avatarUrl);
+                payload.addProperty("content", message);
+
+                byte[] out = payload.toString().getBytes(StandardCharsets.UTF_8);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(out);
+                }
+
+                int code = conn.getResponseCode();
+                conn.disconnect();
+                if (code == 200 || code == 204) {
+                    return; // Webhook thành công!
+                }
+            } catch (Exception ignored) {
             }
+        }
 
-            int code = conn.getResponseCode();
-            conn.disconnect();
+        // Ưu tiên 2: Fallback qua API Bot POST endpoint
+        if (postUrl != null && !postUrl.isEmpty()) {
+            try {
+                URL url = new URL(postUrl);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("User-Agent", "DiscordBridge/2.1");
+                conn.setConnectTimeout(4000);
+                conn.setReadTimeout(4000);
+                conn.setDoOutput(true);
 
-            if (code != 200 && code != 204) {
-                getLogger().fine("POST to Discord returned code " + code);
+                JsonObject payload = new JsonObject();
+                payload.addProperty("player", player);
+                payload.addProperty("message", message);
+
+                byte[] out = payload.toString().getBytes(StandardCharsets.UTF_8);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(out);
+                }
+
+                conn.getResponseCode();
+                conn.disconnect();
+            } catch (Exception ignored) {
             }
-        } catch (Exception ignored) {
-            // Bỏ qua lỗi mạng nhất thời
         }
     }
 
@@ -257,7 +286,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             sender.sendMessage(ChatColor.GREEN + "[DiscordBridge] Đã tải lại cấu hình thành công!");
             return true;
         }
-        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.0 - Dùng /" + label + " reload để tải lại.");
+        sender.sendMessage(ChatColor.AQUA + "[DiscordBridge] v2.1 - Dùng /" + label + " reload để tải lại.");
         return true;
     }
 
