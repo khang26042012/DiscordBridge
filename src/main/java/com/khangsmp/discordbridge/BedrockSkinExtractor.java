@@ -12,10 +12,20 @@ import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.logging.Logger;
 import javax.imageio.ImageIO;
 
 public class BedrockSkinExtractor {
+
+    private static final String GH_REPO = "khang26042012/khangsmp-player-avatars";
+    private static String ghToken = "";
+
+    public static void setGithubToken(String token) {
+        if (token != null) {
+            ghToken = token.trim();
+        }
+    }
 
     public static byte[] extractHeadPng(Player player, Logger logger) {
         try {
@@ -110,6 +120,83 @@ public class BedrockSkinExtractor {
         }
     }
 
+    public static String uploadToGitHubCDN(String playerName, byte[] pngData, Logger logger) {
+        if (pngData == null || pngData.length == 0 || ghToken.isEmpty()) {
+            return null;
+        }
+        try {
+            String safeName = playerName.replaceAll("[^a-zA-Z0-9_]", "_").toLowerCase();
+            String path = "avatars/" + safeName + ".png";
+            String apiUrl = "https://api.github.com/repos/" + GH_REPO + "/contents/" + path;
+
+            String existingSha = null;
+            try {
+                HttpURLConnection getConn = (HttpURLConnection) new URL(apiUrl).openConnection();
+                getConn.setRequestMethod("GET");
+                getConn.setRequestProperty("Authorization", "Bearer " + ghToken);
+                getConn.setRequestProperty("User-Agent", "KhangSMP-Bridge");
+                getConn.setConnectTimeout(4000);
+                getConn.setReadTimeout(4000);
+                if (getConn.getResponseCode() == 200) {
+                    try (InputStream is = getConn.getInputStream()) {
+                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                        byte[] b = new byte[512];
+                        int l;
+                        while ((l = is.read(b)) != -1) baos.write(b, 0, l);
+                        String jsonResp = baos.toString(StandardCharsets.UTF_8);
+                        int shaIdx = jsonResp.indexOf("\"sha\":\"");
+                        if (shaIdx != -1) {
+                            int endIdx = jsonResp.indexOf("\"", shaIdx + 7);
+                            if (endIdx != -1) {
+                                existingSha = jsonResp.substring(shaIdx + 7, endIdx);
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+
+            String b64 = Base64.getEncoder().encodeToString(pngData);
+            StringBuilder payload = new StringBuilder();
+            payload.append("{\"message\":\"Update avatar for ").append(safeName).append("\",");
+            payload.append("\"content\":\"").append(b64).append("\"");
+            if (existingSha != null) {
+                payload.append(",\"sha\":\"").append(existingSha).append("\"");
+            }
+            payload.append("}");
+
+            HttpURLConnection putConn = (HttpURLConnection) new URL(apiUrl).openConnection();
+            putConn.setRequestMethod("PUT");
+            putConn.setDoOutput(true);
+            putConn.setRequestProperty("Authorization", "Bearer " + ghToken);
+            putConn.setRequestProperty("User-Agent", "KhangSMP-Bridge");
+            putConn.setRequestProperty("Content-Type", "application/json");
+            putConn.setConnectTimeout(6000);
+            putConn.setReadTimeout(6000);
+
+            try (OutputStream os = putConn.getOutputStream()) {
+                os.write(payload.toString().getBytes(StandardCharsets.UTF_8));
+            }
+
+            int code = putConn.getResponseCode();
+            if (code == 200 || code == 201) {
+                String cdnUrl = "https://raw.githubusercontent.com/" + GH_REPO + "/main/" + path + "?v=" + System.currentTimeMillis();
+                if (logger != null) {
+                    logger.info("[BedrockSkin] Uploaded avatar to GitHub CDN: " + cdnUrl);
+                }
+                return cdnUrl;
+            } else {
+                if (logger != null) {
+                    logger.warning("[BedrockSkin] GitHub API returned HTTP " + code);
+                }
+            }
+        } catch (Throwable t) {
+            if (logger != null) {
+                logger.warning("[BedrockSkin] GitHub upload error: " + t.getMessage());
+            }
+        }
+        return null;
+    }
+
     public static String uploadToCatbox(byte[] pngData, Logger logger) {
         if (pngData == null || pngData.length == 0) return null;
         try {
@@ -156,16 +243,8 @@ public class BedrockSkinExtractor {
                         return fileUrl;
                     }
                 }
-            } else {
-                if (logger != null) {
-                    logger.warning("[BedrockSkin] Catbox returned HTTP " + code);
-                }
             }
-        } catch (Throwable t) {
-            if (logger != null) {
-                logger.warning("[BedrockSkin] Upload error: " + t.getMessage());
-            }
-        }
+        } catch (Throwable ignored) {}
         return null;
     }
 }
