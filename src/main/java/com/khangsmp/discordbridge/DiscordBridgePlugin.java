@@ -89,7 +89,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         }
 
         getLogger().info("========================================");
-        getLogger().info(" DiscordBridge v2.8 (Direct Geyser In-Memory Skin Extractor)");
+        getLogger().info(" DiscordBridge v3.0 (GitHub CDN Skin Storage) (Direct Geyser In-Memory Skin Extractor)");
         getLogger().info(" Discord -> MC : " + apiUrl + " (" + pollInterval + "s)");
         getLogger().info(" MC -> Discord : " + (sendMcToDiscord ? "Webhook Active" : "Off"));
         getLogger().info("========================================");
@@ -109,6 +109,8 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
             "https://discord.com/api/webhooks/1550457214580559912/_PuohPUiSxkxgU3yYJFDHvbuUs4Shous3dkAu9IpPtpwYssPDdoht14FJF-bAlNjne3X");
 
         apiKey = getConfig().getString("api.key", "khangsmp_mcbridge_key_2026");
+        String ghToken = getConfig().getString("api.github-token", "");
+        BedrockSkinExtractor.setGithubToken(ghToken);
         pollInterval = Math.max(1, getConfig().getInt("poll-interval", 1));
         chatFormat = getConfig().getString("chat-format", "&9[Discord] &f{name}&7: &f{message}");
         maxMessageLength = getConfig().getInt("max-message-length", 200);
@@ -239,6 +241,10 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                 && FloodgateApi.getInstance().isFloodgatePlayer(player.getUniqueId()))) {
             byte[] headPng = BedrockSkinExtractor.extractHeadPng(player, getLogger());
             if (headPng != null && headPng.length > 0) {
+                String ghUrl = BedrockSkinExtractor.uploadToGitHubCDN(player.getName(), headPng, getLogger());
+                if (ghUrl != null && !ghUrl.isEmpty()) {
+                    return ghUrl;
+                }
                 String catboxUrl = BedrockSkinExtractor.uploadToCatbox(headPng, getLogger());
                 if (catboxUrl != null) {
                     return catboxUrl;
