@@ -27,6 +27,67 @@ public class BedrockSkinExtractor {
         }
     }
 
+    public static byte[] extractHeadFromImage(BufferedImage skinImg) {
+        if (skinImg == null) return null;
+        try {
+            int width = skinImg.getWidth();
+            int height = skinImg.getHeight();
+            int scale = width / 64;
+            if (scale < 1) scale = 1;
+
+            BufferedImage face = skinImg.getSubimage(8 * scale, 8 * scale, 8 * scale, 8 * scale);
+            BufferedImage hat = skinImg.getSubimage(40 * scale, 8 * scale, 8 * scale, 8 * scale);
+
+            BufferedImage head = new BufferedImage(8 * scale, 8 * scale, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = head.createGraphics();
+            g.drawImage(face, 0, 0, null);
+            g.drawImage(hat, 0, 0, null);
+            g.dispose();
+
+            BufferedImage scaledHead = new BufferedImage(128, 128, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g2 = scaledHead.createGraphics();
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            g2.drawImage(head, 0, 0, 128, 128, null);
+            g2.dispose();
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(scaledHead, "PNG", baos);
+            return baos.toByteArray();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    public static String resolveAndUploadCustomSkin(String skinUrl, String playerName, Logger logger) {
+        if (skinUrl == null || skinUrl.isEmpty()) return null;
+        if (skinUrl.contains("/texture/")) {
+            String hash = skinUrl.substring(skinUrl.lastIndexOf('/') + 1);
+            return "https://mc-heads.net/head/" + hash + "/128.png";
+        }
+        try {
+            URL sUrl = new URL(skinUrl);
+            HttpURLConnection sConn = (HttpURLConnection) sUrl.openConnection();
+            sConn.setRequestProperty("User-Agent", "Mozilla/5.0");
+            sConn.setConnectTimeout(3000);
+            sConn.setReadTimeout(3000);
+            if (sConn.getResponseCode() == 200) {
+                BufferedImage skinImg = ImageIO.read(sConn.getInputStream());
+                byte[] headPng = extractHeadFromImage(skinImg);
+                if (headPng != null && headPng.length > 0) {
+                    String cdnUrl = uploadToGitHubCDN(playerName, headPng, logger);
+                    if (cdnUrl != null && !cdnUrl.isEmpty()) {
+                        return cdnUrl;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            if (logger != null) {
+                logger.warning("[CustomSkin] Error cropping skin from " + skinUrl + ": " + t.getMessage());
+            }
+        }
+        return null;
+    }
+
     public static byte[] extractHeadPng(Player player, Logger logger) {
         try {
             Class<?> geyserImplClass = Class.forName("org.geysermc.geyser.GeyserImpl");
@@ -86,27 +147,7 @@ public class BedrockSkinExtractor {
                 }
             }
 
-            int scale = width / 64;
-            if (scale < 1) scale = 1;
-
-            BufferedImage face = skinImg.getSubimage(8 * scale, 8 * scale, 8 * scale, 8 * scale);
-            BufferedImage hat = skinImg.getSubimage(40 * scale, 8 * scale, 8 * scale, 8 * scale);
-
-            BufferedImage head = new BufferedImage(8 * scale, 8 * scale, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D g = head.createGraphics();
-            g.drawImage(face, 0, 0, null);
-            g.drawImage(hat, 0, 0, null);
-            g.dispose();
-
-            BufferedImage scaledHead = new BufferedImage(128, 128, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D g2 = scaledHead.createGraphics();
-            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-            g2.drawImage(head, 0, 0, 128, 128, null);
-            g2.dispose();
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ImageIO.write(scaledHead, "PNG", baos);
-            byte[] res = baos.toByteArray();
+            byte[] res = extractHeadFromImage(skinImg);
             if (logger != null) {
                 logger.info("[BedrockSkin] Successfully extracted 128x128 head PNG (" + res.length + " bytes)");
             }

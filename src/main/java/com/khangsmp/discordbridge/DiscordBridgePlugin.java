@@ -263,19 +263,17 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                         String s = skin.toString();
                         if (s.contains("/texture/")) {
                             String hash = s.substring(s.lastIndexOf('/') + 1);
-                            if (!hash.equals(DEFAULT_STEVE_HASH)) {
-                                return "https://mc-heads.net/head/" + hash + "/128.png";
-                            }
+                            return "https://mc-heads.net/head/" + hash + "/128.png";
                         }
                     }
                 }
             }
         } catch (Throwable ignored) {}
 
-        // 3. TLauncher cho Java cracked
+        // 3. TLauncher cho Java cracked (Tự động trích xuất avatar đầu, không gửi ảnh phẳng 2D)
         if (!name.startsWith("PE_")) {
             String tlSkin = fetchTLauncherSkin(name);
-            if (tlSkin != null) {
+            if (tlSkin != null && !tlSkin.isEmpty()) {
                 return tlSkin;
             }
         }
@@ -304,7 +302,10 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
                 if (json.has("SKIN")) {
                     String skinUrl = json.getAsJsonObject("SKIN").get("url").getAsString();
                     if (skinUrl != null && !skinUrl.isEmpty()) {
-                        return skinUrl;
+                        String avatarUrl = BedrockSkinExtractor.resolveAndUploadCustomSkin(skinUrl, username, getLogger());
+                        if (avatarUrl != null && !avatarUrl.isEmpty()) {
+                            return avatarUrl;
+                        }
                     }
                 }
             }
