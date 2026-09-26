@@ -10,6 +10,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
@@ -236,9 +237,14 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
     private String fetchSkinDirectly(Player player) {
         String name = player.getName();
 
-        // 1. Nếu là người chơi Bedrock/PE -> Trích xuất trực tiếp Pixel Skin từ bộ nhớ Geyser
+        // 1. Nếu là người chơi Bedrock/PE -> Ưu tiên GeyserMC Global API chuyển đổi sang Mojang signed texture (chuẩn 3D cho cả Persona lẫn Classic)
         if (name.startsWith("PE_") || (Bukkit.getPluginManager().isPluginEnabled("floodgate") 
                 && FloodgateApi.getInstance().isFloodgatePlayer(player.getUniqueId()))) {
+            String bedrockSkin = fetchBedrockSkinGeyserApi(player);
+            if (bedrockSkin != null && !bedrockSkin.isEmpty()) {
+                return bedrockSkin;
+            }
+            // Fallback: Trích xuất trực tiếp từ pixel Geyser nếu là skin cổ điển chuẩn 64x64
             byte[] headPng = BedrockSkinExtractor.extractHeadPng(player, getLogger());
             if (headPng != null && headPng.length > 0) {
                 String ghUrl = BedrockSkinExtractor.uploadToGitHubCDN(player.getName(), headPng, getLogger());
@@ -281,6 +287,54 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         // 4. Fallback theo tên không có PE_
         String cleanName = name.startsWith("PE_") ? name.substring(3) : name;
         return "https://mc-heads.net/head/" + cleanName + "/128.png";
+    }
+
+    private String fetchBedrockSkinGeyserApi(Player player) {
+        try {
+            String xuid = null;
+            if (Bukkit.getPluginManager().isPluginEnabled("floodgate")) {
+                try {
+                    FloodgatePlayer fp = FloodgateApi.getInstance().getPlayer(player.getUniqueId());
+                    if (fp != null) {
+                        xuid = fp.getXuid();
+                    }
+                } catch (Throwable ignored) {}
+            }
+            if (xuid == null && (player.getUniqueId().getMostSignificantBits() == 0L)) {
+                xuid = String.valueOf(player.getUniqueId().getLeastSignificantBits());
+            }
+            if (xuid == null || xuid.isEmpty() || xuid.equals("0")) {
+                return null;
+            }
+
+            URL url = new URL("https://api.geysermc.org/v2/skin/" + xuid);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("User-Agent", "Geyser-Spigot/2.4.2-SNAPSHOT (KhangSMP; en_US)");
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setConnectTimeout(3000);
+            conn.setReadTimeout(3000);
+
+            if (conn.getResponseCode() == 200) {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                reader.close();
+
+                JsonObject json = new JsonParser().parse(sb.toString()).getAsJsonObject();
+                if (json.has("texture_id")) {
+                    String tid = json.get("texture_id").getAsString();
+                    if (tid != null && !tid.isEmpty()) {
+                        getLogger().info("[GeyserSkin] Converted Bedrock skin for " + player.getName() + " -> " + tid);
+                        return "https://mc-heads.net/head/" + tid + "/128.png";
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            getLogger().warning("[GeyserSkin] Error fetching Geyser skin for " + player.getName() + ": " + t.getMessage());
+        }
+        return null;
     }
 
     private String fetchTLauncherSkin(String username) {
