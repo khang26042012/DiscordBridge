@@ -133,6 +133,17 @@ public class BedrockSkinExtractor {
                 logger.info("[BedrockSkin] Extracting skin for " + player.getName() + " (size: " + width + "x" + height + ")");
             }
 
+            // BẢO VỆ CHỐNG BIẾN DẠNG 2D CHO BEDROCK:
+            // Với skin Persona / Marketplace / Character Creator (256x256),
+            // việc cắt subimage (32, 32) sẽ cắt trúng thân, chân hoặc dải pixel phụ kiện.
+            // Trả về null để chuyển giao sang GeyserMC Global API chuyển đổi sang chuẩn 3D!
+            if (width > 128 || height > 128) {
+                if (logger != null) {
+                    logger.info("[BedrockSkin] Skin of " + player.getName() + " is " + width + "x" + height + " (Persona/HD), skipping naive pixel extraction to prevent distorted 2D body parts.");
+                }
+                return null;
+            }
+
             BufferedImage skinImg = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
             int idx = 0;
             for (int y = 0; y < height; y++) {
