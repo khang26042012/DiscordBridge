@@ -96,6 +96,7 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
         getLogger().info("========================================");
 
         startPollingTask();
+        registerPlaceholderHook();
     }
 
     private void loadConfigValues() {
@@ -192,6 +193,53 @@ public class DiscordBridgePlugin extends JavaPlugin implements Listener, Command
     }
 
     // ================= CHIỀU 2: MINECRAFT -> DISCORD =================
+    private void registerPlaceholderHook() {
+        if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+            try {
+                new me.clip.placeholderapi.expansion.PlaceholderExpansion() {
+                    @Override
+                    public String getIdentifier() {
+                        return "realping";
+                    }
+
+                    @Override
+                    public String getAuthor() {
+                        return "KhangSMP";
+                    }
+
+                    @Override
+                    public String getVersion() {
+                        return "1.0.0";
+                    }
+
+                    @Override
+                    public boolean persist() {
+                        return true;
+                    }
+
+                    @Override
+                    public String onPlaceholderRequest(Player player, String params) {
+                        if (player == null) return "0";
+                        try {
+                            if (Bukkit.getPluginManager().isPluginEnabled("Geyser-Spigot")) {
+                                org.geysermc.geyser.api.connection.GeyserConnection conn =
+                                        org.geysermc.geyser.api.GeyserApi.api().connectionByUuid(player.getUniqueId());
+                                if (conn != null) {
+                                    int p = conn.ping();
+                                    if (p > 0) return String.valueOf(p);
+                                }
+                            }
+                        } catch (Throwable ignored) {}
+                        return String.valueOf(player.getPing());
+                    }
+                }.register();
+                getLogger().info("[DiscordBridge] Registered %realping% placeholder hook successfully!");
+            } catch (Throwable t) {
+                getLogger().warning("[DiscordBridge] Failed to register %realping% hook: " + t.getMessage());
+            }
+        }
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerChat(AsyncPlayerChatEvent event) {
         if (!sendMcToDiscord) return;
